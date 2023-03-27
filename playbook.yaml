@@ -1,0 +1,114 @@
+---
+- name: Instalar e configurar o ContainerD
+  hosts: all
+  tasks:
+  - name: Instalação de modulos do Kernel Linux
+    ansible.builtin.copy:
+      src: ./k8s.conf
+      dest: /etc/sysctl.d/k8s.conf
+      mode: '644'
+
+  - name: Adicionando Overlay
+    modprobe:
+      name: Overlay
+      state: present 
+      
+  - name: Adicionando br_netfilter
+    modprobe:
+      name: br_netfilter
+      state: present 
+
+  - name: Configuração dos parâmentros do sysctl
+    ansible.builtin.copy:
+      src: ./k8s-cri.conf
+      dest: /etc/sysctl.d/k8s.conf
+      mode: '644'
+
+  - name: Executando o comando sysctl para implementar as Configurações
+    command: "sysctl --system"
+  
+  - name: Adicionar a chave do repositorio APT
+    apt_key:
+      url: https://download.docker.com/linux/ubuntu/gpg
+      state: present
+
+  - name: Adicionando o repositorio para instalar o ContainerD
+    ansible.builtin.apt_repository:
+      repo: deb https://download.docker.com/linux/ubuntu bionic stable
+      state: present
+
+  - name: Instalando o ContainerD
+    apt:
+      name: containerd.io=1.6.12-1 
+      update_cache: yes
+
+  - name: Criação do diretorio do ContainerD
+    file:
+      path: /etc/containerd
+      state: directory
+      owner: root 
+      group: root 
+      mode: 0644
+  - name: Criar o arquivo de Configuração do ContainerD
+    shell: containerd config default > /etc/containerd/config.toml
+
+  - name: Trocando o config do containerd 
+    command: sed -i 's/SystemdGrou´p=false/SystemdGroup=true/g'
+
+  - name: Restart containerd
+    ansible.builtin.service:
+      name: containerd
+      state: restarted
+  
+- name: Instalação do Kubeadm, Kubelet e Kubectl
+  hosts: all
+  tasks:
+  - name: Instalação dos pacotes requisitos 
+    apt:
+      pkg:
+      - apt-transport-https 
+      - ca-certificates
+      - curl
+      state: present
+  - name: Adicionando a chave do repositorio
+    apt_key:
+      url:  https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      state: present
+  - name: Adicionando repositorio
+    apt_repository:
+      repo: deb  https://apt.kubernetes.io/ kubernetes-xenial main"
+      state: present
+  - name: Instalação dos pacotes Kubeadm, Kubelet e Kubectl
+    apt:
+      pkg:
+      - kubelet=1.26.0-00 
+      - kubeadm=1.26.0-00
+      - kubectl=1.26.0-00
+      state: present
+- name: Inicio do cluster k8s
+  hosts: Control_plane
+  tasks:
+  - name: Comando de inicialização
+    command: kubeadm init --apiserver-advertise-address=192.168.100.200 --pod-network-cidr=10.244.0.0/16
+  
+  - name: Criação do diretorio .kube
+    file:
+      path: ~/.kube 
+      state: directory
+      owner: root
+      group: root
+      mode: 0644
+
+  - name: Copia do arquivo kube config
+    copy:
+      src: /etc/kubernetes/admin.conf
+      dest: ~/.kube/config
+      remote_src: yes
+      owner: root
+      group: root
+      mode: 0640
+
+  - name: Aplicar a instalação do Calico
+    command: kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.25.0/manifests/tigera-operator.yaml
+
+      
